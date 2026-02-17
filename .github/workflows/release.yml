@@ -1,0 +1,221 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Version bump type"
+        required: true
+        default: "auto"
+        type: choice
+        options:
+          - auto
+          - patch
+          - minor
+          - major
+
+permissions:
+  contents: write
+
+jobs:
+  # ── CI: build and test on every push ──────────────────────────────────────
+  build:
+    name: Build & Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      - name: Cache modules
+        uses: actions/cache@v4
+        with:
+          path: ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Build
+        run: go build -v ./...
+
+      - name: Vet
+        run: go vet ./...
+
+  # ── Release: triggered on workflow_dispatch or commit with [release] tag ──
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    needs: build
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' && contains(github.event.head_commit.message, '[release]'))
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Full history for commit log
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      - name: Install commitai (self-hosted or build locally)
+        run: |
+          go build -o ./commitai-bin ./main.go 2>/dev/null || \
+          go build -o ./commitai-bin . 2>/dev/null || true
+
+      - name: Determine version bump
+        id: bump
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          BUMP="${{ github.event.inputs.bump || 'auto' }}"
+
+          # Get current tag
+          CURRENT_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          echo "current_tag=${CURRENT_TAG}" >> $GITHUB_OUTPUT
+
+          if [ "$BUMP" = "auto" ] && [ -n "$GEMINI_API_KEY" ]; then
+            # Use AI to determine version bump
+            echo "Using AI to determine version..."
+
+            if [ -n "$CURRENT_TAG" ]; then
+              COMMITS=$(git log --oneline "${CURRENT_TAG}..HEAD" 2>/dev/null || git log --oneline -20)
+            else
+              COMMITS=$(git log --oneline -20)
+            fi
+
+            # Call Gemini API directly
+            PROMPT="You are a versioning expert. Current version: ${CURRENT_TAG:-none}. Commits: ${COMMITS}. Output ONLY one word: major, minor, or patch."
+            RESPONSE=$(curl -s -X POST \
+              "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}" \
+              -H "Content-Type: application/json" \
+              -d "{\"contents\":[{\"parts\":[{\"text\":\"${PROMPT}\"}]}]}" | \
+              python3 -c "import sys,json; d=json.load(sys.stdin); print(d['candidates'][0]['content']['parts'][0]['text'].strip().lower())" 2>/dev/null || echo "patch")
+
+            case "$RESPONSE" in
+              major|minor|patch) BUMP="$RESPONSE" ;;
+              *) BUMP="patch" ;;
+            esac
+            echo "AI suggested bump: $BUMP"
+          fi
+
+          # Calculate new version
+          if [ -z "$CURRENT_TAG" ]; then
+            NEW_VERSION="0.1.0"
+          else
+            VERSION="${CURRENT_TAG#v}"
+            IFS='.' read -r MAJ MIN PAT <<< "$VERSION"
+            case "$BUMP" in
+              major) NEW_VERSION="$((MAJ+1)).0.0" ;;
+              minor) NEW_VERSION="${MAJ}.$((MIN+1)).0" ;;
+              *)     NEW_VERSION="${MAJ}.${MIN}.$((PAT+1))" ;;
+            esac
+          fi
+
+          echo "bump=${BUMP}" >> $GITHUB_OUTPUT
+          echo "new_version=${NEW_VERSION}" >> $GITHUB_OUTPUT
+          echo "new_tag=v${NEW_VERSION}" >> $GITHUB_OUTPUT
+          echo "📌 New version: v${NEW_VERSION} (${BUMP} bump)"
+
+      - name: Generate release notes with AI
+        id: notes
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          CURRENT_TAG="${{ steps.bump.outputs.current_tag }}"
+          NEW_TAG="${{ steps.bump.outputs.new_tag }}"
+
+          if [ -n "$CURRENT_TAG" ]; then
+            COMMITS=$(git log --oneline "${CURRENT_TAG}..HEAD" 2>/dev/null || git log --oneline -30)
+          else
+            COMMITS=$(git log --oneline -30)
+          fi
+
+          if [ -n "$GEMINI_API_KEY" ]; then
+            echo "Generating AI release notes..."
+
+            PROMPT="Generate GitHub release notes for version ${NEW_TAG} (previous: ${CURRENT_TAG:-none}). Use markdown with sections: ## 🚀 Features, ## 🐛 Bug Fixes, ## 🔧 Improvements (omit empty sections). Be concise and user-friendly. Start with a one-sentence summary. Commits: $(echo "$COMMITS" | head -50 | tr '\n' '|')"
+
+            NOTES=$(curl -s -X POST \
+              "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}" \
+              -H "Content-Type: application/json" \
+              -d "{\"contents\":[{\"parts\":[{\"text\":\"$(echo "$PROMPT" | python3 -c "import sys,json; print(json.dumps(sys.stdin.read()))" | tr -d '"')\"}]}],\"generationConfig\":{\"maxOutputTokens\":1024}}" | \
+              python3 -c "
+              import sys, json
+              try:
+                  d = json.load(sys.stdin)
+                  print(d['candidates'][0]['content']['parts'][0]['text'])
+              except:
+                  print('Release notes generation failed. See commits for details.')
+              " 2>/dev/null)
+                        else
+                          echo "No GEMINI_API_KEY — generating basic release notes..."
+                          NOTES="## What's Changed\n\n${COMMITS}"
+                        fi
+
+          # Save notes to file (multiline safe)
+          echo "$NOTES" > release_notes.md
+          echo "notes_file=release_notes.md" >> $GITHUB_OUTPUT
+
+      - name: Build binaries for all platforms
+        run: |
+          VERSION="${{ steps.bump.outputs.new_version }}"
+          COMMIT="${{ github.sha }}"
+          LDFLAGS="-X github.com/kaiqui/commitai/cmd.Version=${VERSION} -X github.com/kaiqui/commitai/cmd.Commit=${COMMIT:0:8} -s -w"
+
+          mkdir -p dist
+
+          targets=(
+            "linux/amd64"
+            "linux/arm64"
+            "darwin/amd64"
+            "darwin/arm64"
+          )
+
+          for target in "${targets[@]}"; do
+            OS="${target%/*}"
+            ARCH="${target#*/}"
+            OUTPUT="dist/commitai_${OS}_${ARCH}"
+
+            echo "Building ${OS}/${ARCH}..."
+            GOOS="$OS" GOARCH="$ARCH" go build \
+              -ldflags="$LDFLAGS" \
+              -o "$OUTPUT" \
+              .
+
+            # Create tarball
+            cd dist
+            tar -czf "commitai_${OS}_${ARCH}.tar.gz" "commitai_${OS}_${ARCH}"
+            cd ..
+          done
+
+          ls -la dist/
+
+      - name: Create git tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "${{ steps.bump.outputs.new_tag }}" -m "Release ${{ steps.bump.outputs.new_tag }}"
+          git push origin "${{ steps.bump.outputs.new_tag }}"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.bump.outputs.new_tag }}
+          name: "Release ${{ steps.bump.outputs.new_tag }}"
+          body_path: release_notes.md
+          draft: false
+          prerelease: false
+          files: |
+            dist/commitai_linux_amd64.tar.gz
+            dist/commitai_linux_arm64.tar.gz
+            dist/commitai_darwin_amd64.tar.gz
+            dist/commitai_darwin_arm64.tar.gz
