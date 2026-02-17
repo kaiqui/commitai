@@ -127,7 +127,7 @@ jobs:
               -X POST \
               -H "Content-Type: application/json" \
               -d @/tmp/bump_payload.json \
-              "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}")
+              "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}")
 
             echo "Gemini HTTP: ${HTTP_CODE}"
 
@@ -269,7 +269,7 @@ jobs:
               -X POST \
               -H "Content-Type: application/json" \
               -d @/tmp/notes_payload.json \
-              "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}")
+              "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}")
 
             echo "Gemini HTTP: ${HTTP_CODE}"
 
