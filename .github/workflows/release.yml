@@ -95,7 +95,7 @@ jobs:
             # Call Gemini API directly
             PROMPT="You are a versioning expert. Current version: ${CURRENT_TAG:-none}. Commits: ${COMMITS}. Output ONLY one word: major, minor, or patch."
             RESPONSE=$(curl -s -X POST \
-              "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}" \
+              "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}" \
               -H "Content-Type: application/json" \
               -d "{\"contents\":[{\"parts\":[{\"text\":\"${PROMPT}\"}]}]}" | \
               python3 -c "import sys,json; d=json.load(sys.stdin); print(d['candidates'][0]['content']['parts'][0]['text'].strip().lower())" 2>/dev/null || echo "patch")
@@ -145,7 +145,7 @@ jobs:
             PROMPT="Generate GitHub release notes for version ${NEW_TAG} (previous: ${CURRENT_TAG:-none}). Use markdown with sections: ## 🚀 Features, ## 🐛 Bug Fixes, ## 🔧 Improvements (omit empty sections). Be concise and user-friendly. Start with a one-sentence summary. Commits: $(echo "$COMMITS" | head -50 | tr '\n' '|')"
 
             NOTES=$(curl -s -X POST \
-              "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}" \
+              "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}" \
               -H "Content-Type: application/json" \
               -d "{\"contents\":[{\"parts\":[{\"text\":\"$(echo "$PROMPT" | python3 -c "import sys,json; print(json.dumps(sys.stdin.read()))" | tr -d '"')\"}]}],\"generationConfig\":{\"maxOutputTokens\":1024}}" | \
               python3 -c "
