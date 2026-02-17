@@ -178,12 +178,12 @@ Config file: `~/.commitai.json`
   "language": "pt-br",
   "commit_style": "conventional",
   "max_tokens": 1024,
-  "model": "gemini-2.0-flash"
+  "model": "gemini-2.5-flash"
 }
 ```
 
 Available models:
-- `gemini-2.0-flash` (default, fastest)
+- `gemini-2.5-flash` (default, fastest)
 - `gemini-1.5-pro` (more capable)
 - `gemini-1.5-flash` (balanced)
 
