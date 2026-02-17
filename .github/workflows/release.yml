@@ -106,9 +106,9 @@ jobs:
               printf 'You are a semantic versioning expert.\n'
               printf 'Current version: %s\n\n' "${CURRENT_TAG:-none}"
               printf 'Analyze these git commits and decide the version bump:\n'
-              printf '- MAJOR: any commit with "BREAKING CHANGE", "feat!:" or "fix!:"\n'
-              printf '- MINOR: any commit starting with "feat:"\n'
-              printf '- PATCH: everything else (fix, chore, docs, refactor, test, perf, ci)\n\n'
+              printf 'MAJOR: any commit with "BREAKING CHANGE", "feat!:" or "fix!:"\n'
+              printf 'MINOR: any commit starting with "feat:"\n'
+              printf 'PATCH: everything else (fix, chore, docs, refactor, test, perf, ci)\n\n'
               printf 'Commits:\n'
               cat /tmp/commits.txt
               printf '\n\nOutput ONLY one word (lowercase): major, minor, or patch\n'
@@ -247,10 +247,10 @@ jobs:
               printf '**Full changelog:** [%s...%s](https://github.com/%s/compare/%s...%s)\n\n' \
                 "${CURRENT_TAG:-initial}" "$NEW_TAG" "$REPO" "${CURRENT_TAG:-initial}" "$NEW_TAG"
               printf 'Rules:\n'
-              printf '- Be concise and user-friendly — not just commit hash dumps\n'
-              printf '- Explain WHAT changed and WHY it matters to users\n'
-              printf '- Group related changes\n'
-              printf '- Output ONLY the markdown, no preamble\n\n'
+              printf 'Be concise and user-friendly — not just commit hash dumps\n'
+              printf 'Explain WHAT changed and WHY it matters to users\n'
+              printf 'Group related changes\n'
+              printf 'Output ONLY the markdown, no preamble\n\n'
               printf 'Commits:\n'
               cat /tmp/commits.txt
               if [ -n "$DIFF_STAT" ]; then

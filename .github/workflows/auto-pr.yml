@@ -114,8 +114,8 @@ jobs:
               printf '  ## 🔧 Improvements\n'
               printf '  ## 📚 Documentation\n'
               printf '  ## ⚠️ Breaking Changes\n'
-              printf '- End with "## 🧪 Testing" noting CI passed (build, vet, tests green)\n'
-              printf '- Output ONLY the markdown body, no preamble\n\n'
+              printf 'End with "## 🧪 Testing" noting CI passed (build, vet, tests green)\n'
+              printf 'Output ONLY the markdown body, no preamble\n\n'
               printf 'Commits to summarize:\n'
               cat /tmp/commits.txt
             } > /tmp/prompt.txt
