@@ -1,0 +1,214 @@
+name: Auto PR — develop → main
+
+on:
+  push:
+    branches:
+      - develop
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  # ── 1. CI completo antes de qualquer coisa ────────────────────────────────
+  ci:
+    name: CI (Build & Test)
+    runs-on: ubuntu-latest
+
+    outputs:
+      passed: ${{ steps.result.outputs.passed }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          cache: true
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Verify dependencies
+        run: go mod verify
+
+      - name: Build
+        run: go build -v ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test -v -race -coverprofile=coverage.out ./...
+
+      - name: Mark passed
+        id: result
+        if: success()
+        run: echo "passed=true" >> $GITHUB_OUTPUT
+
+  # ── 2. Gera descrição da PR com Gemini (curl + jq, sem Python) ───────────
+  generate-pr-body:
+    name: Generate PR description (AI)
+    runs-on: ubuntu-latest
+    needs: ci
+    if: needs.ci.outputs.passed == 'true'
+
+    outputs:
+      pr_body:      ${{ steps.ai.outputs.pr_body }}
+      commit_count: ${{ steps.commits.outputs.count }}
+      pr_title:     ${{ steps.commits.outputs.title }}
+
+    steps:
+      - name: Checkout (full history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Collect commits develop → main
+        id: commits
+        run: |
+          git fetch origin main --depth=50 2>/dev/null || true
+
+          COMMITS=$(git log origin/main..HEAD --oneline --no-merges 2>/dev/null \
+                    || git log --oneline --no-merges -20)
+
+          COUNT=$(printf '%s\n' "$COMMITS" | grep -c . || echo "0")
+          LATEST=$(git log -1 --format="%s")
+
+          echo "count=${COUNT}" >> $GITHUB_OUTPUT
+          echo "title=🚀 develop → main | ${LATEST} (+${COUNT} commits)" >> $GITHUB_OUTPUT
+
+          # Arquivo evita problemas com newlines em env vars
+          printf '%s' "$COMMITS" > /tmp/commits.txt
+          echo "--- commits ---"
+          cat /tmp/commits.txt
+
+      - name: Generate PR body with Gemini
+        id: ai
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          REPO:           ${{ github.repository }}
+          BRANCH:         ${{ github.ref_name }}
+          COMMIT_COUNT:   ${{ steps.commits.outputs.count }}
+        run: |
+          COMMITS=$(cat /tmp/commits.txt)
+          SHORT="${{ github.sha }}"
+          SHORT="${SHORT:0:7}"
+          AI_TEXT=""
+
+          if [ -n "$GEMINI_API_KEY" ]; then
+            echo "Calling Gemini..."
+
+            # Prompt em arquivo separado — sem heredoc dentro de heredoc
+            {
+              printf 'You are a senior developer writing a Pull Request description.\n'
+              printf 'Generate a professional PR description in markdown.\n\n'
+              printf 'Rules:\n'
+              printf '- Start with a one-paragraph summary of what this PR does\n'
+              printf '- Use these sections (omit entire section if empty):\n'
+              printf '  ## 🚀 New Features\n'
+              printf '  ## 🐛 Bug Fixes\n'
+              printf '  ## ♻️ Refactoring\n'
+              printf '  ## 🔧 Improvements\n'
+              printf '  ## 📚 Documentation\n'
+              printf '  ## ⚠️ Breaking Changes\n'
+              printf '- End with "## 🧪 Testing" noting CI passed (build, vet, tests green)\n'
+              printf '- Output ONLY the markdown body, no preamble\n\n'
+              printf 'Commits to summarize:\n'
+              cat /tmp/commits.txt
+            } > /tmp/prompt.txt
+
+            # jq serializa o prompt como string JSON (escapa aspas, newlines, etc.)
+            PROMPT_JSON=$(jq -Rs '.' /tmp/prompt.txt)
+
+            # Monta payload JSON
+            jq -n \
+              --argjson p "$PROMPT_JSON" \
+              '{contents:[{parts:[{text:$p}]}],generationConfig:{maxOutputTokens:1024,temperature:0.3}}' \
+              > /tmp/payload.json
+
+            # Chama a API e captura HTTP status separado do body
+            HTTP_CODE=$(curl -s -w "%{http_code}" -o /tmp/gemini.json \
+              -X POST \
+              -H "Content-Type: application/json" \
+              -d @/tmp/payload.json \
+              "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}")
+
+            echo "Gemini HTTP: ${HTTP_CODE}"
+
+            if [ "$HTTP_CODE" = "200" ]; then
+              # Extrai texto com jq
+              AI_TEXT=$(jq -r '.candidates[0].content.parts[0].text // empty' /tmp/gemini.json)
+              [ -n "$AI_TEXT" ] && echo "✅ AI body generated" || echo "⚠️ Empty AI response"
+            else
+              echo "⚠️ Gemini HTTP ${HTTP_CODE}:"
+              jq '.' /tmp/gemini.json || cat /tmp/gemini.json
+            fi
+          fi
+
+          # Fallback se IA não respondeu ou não há chave
+          if [ -z "$AI_TEXT" ]; then
+            AI_TEXT=$(printf '## Summary\n\nAutomated PR from `develop` → `main` with %s commit(s).\n\n## Changes\n\n```\n%s\n```\n\n## 🧪 Testing\n\nCI passed ✅ — build, vet and tests all green.' \
+              "$COMMIT_COUNT" "$COMMITS")
+          fi
+
+          # Escreve body + rodapé em arquivo
+          printf '%s\n' "$AI_TEXT" > /tmp/pr_body.md
+          printf '\n---\n> 🤖 Generated by [commitai](https://github.com/%s) using Gemini AI\n> 📦 Commit: `%s` | Branch: `%s`\n' \
+            "$REPO" "$SHORT" "$BRANCH" >> /tmp/pr_body.md
+
+          # Exporta output multiline com delimitador aleatório (evita colisão)
+          DELIM="PR_BODY_$(head -c8 /dev/urandom | base64 | tr -dc 'A-Z0-9')"
+          {
+            echo "pr_body<<${DELIM}"
+            cat /tmp/pr_body.md
+            echo "${DELIM}"
+          } >> $GITHUB_OUTPUT
+
+          echo "--- preview ---"
+          head -20 /tmp/pr_body.md
+
+  # ── 3. Cria ou atualiza a PR develop → main ──────────────────────────────
+  open-pr:
+    name: Open / Update Pull Request
+    runs-on: ubuntu-latest
+    needs: [ci, generate-pr-body]
+    if: needs.ci.outputs.passed == 'true'
+
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create or update PR
+        id: pr
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token:  ${{ secrets.GITHUB_TOKEN }}
+          base:   main
+          head:   develop
+          title:  ${{ needs.generate-pr-body.outputs.pr_title }}
+          body:   ${{ needs.generate-pr-body.outputs.pr_body }}
+          labels: |
+            automated-pr
+            ready-to-merge
+          draft: false
+
+      - name: Job summary
+        env:
+          PR_URL: ${{ steps.pr.outputs.pull-request-url }}
+          COUNT:  ${{ needs.generate-pr-body.outputs.commit_count }}
+        run: |
+          echo "## ✅ PR criada/atualizada" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Campo | Valor |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Branch | \`develop\` → \`main\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| CI | ✅ passou |" >> $GITHUB_STEP_SUMMARY
+          echo "| Commits | ${COUNT} |" >> $GITHUB_STEP_SUMMARY
+          [ -n "$PR_URL" ] && echo "| PR | [Abrir](${PR_URL}) |" >> $GITHUB_STEP_SUMMARY || true
