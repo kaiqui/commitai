@@ -27,7 +27,7 @@ Examples:
   commitai config --key YOUR_GEMINI_API_KEY
   commitai config --lang pt-br
   commitai config --style conventional
-  commitai config --model gemini-2.0-flash
+  commitai config --model gemini-2.5-flash
   commitai config --show`,
 	RunE: runConfig,
 }
@@ -36,7 +36,7 @@ func init() {
 	configCmd.Flags().StringVar(&cfgAPIKey, "key", "", "Gemini API key")
 	configCmd.Flags().StringVar(&cfgLanguage, "lang", "", "Language (en, pt-br, es, fr, ...)")
 	configCmd.Flags().StringVar(&cfgStyle, "style", "", "Commit style (conventional, simple)")
-	configCmd.Flags().StringVar(&cfgModel, "model", "", "Gemini model (gemini-2.0-flash, gemini-1.5-pro, ...)")
+	configCmd.Flags().StringVar(&cfgModel, "model", "", "Gemini model (gemini-2.5-flash, gemini-1.5-pro, ...)")
 	configCmd.Flags().BoolVar(&cfgShow, "show", false, "Show current configuration")
 }
 
