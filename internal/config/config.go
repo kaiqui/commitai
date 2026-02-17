@@ -26,7 +26,7 @@ func DefaultConfig() *Config {
 		Language:    "en",
 		CommitStyle: "conventional",
 		MaxTokens:   1024,
-		Model:       "gemini-2.0-flash",
+		Model:       "gemini-2.5-flash",
 	}
 }
 
