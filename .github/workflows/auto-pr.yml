@@ -190,6 +190,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TITLE:    ${{ needs.generate-pr-body.outputs.pr_title }}
         run: |
+          gh auth login --with-token < $GH_TOKEN
           # Verifica se já existe PR aberta de develop → main
           EXISTING=$(gh pr list \
             --base main \
