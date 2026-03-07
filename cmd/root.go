@@ -215,7 +215,9 @@ func handleGranularCommits(changes []git.FileChange, messages map[string]string,
 	}
 
 	// Unstage all, then stage+commit one file at a time
-	exec.Command("git", "restore", "--staged", ".").Run()
+	if err := git.UnstageAll(); err != nil {
+		return fmt.Errorf("failed to unstage files: %w", err)
+	}
 
 	for i, p := range plans {
 		// Re-stage just this file
