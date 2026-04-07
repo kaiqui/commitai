@@ -173,8 +173,8 @@ func (g *GeminiClient) buildCommitPrompt(changes []git.FileChange, granular bool
 		sb.WriteString("Rules:\n")
 		sb.WriteString("- Each message must be concise (max 72 chars for subject line)\n")
 		sb.WriteString("- Add a blank line then a short body if needed\n")
-		sb.WriteString("- Output format must be EXACTLY:\n\n")
-		sb.WriteString("FILE: <filepath>\nMESSAGE:\n<commit message>\n---\n\n")
+		sb.WriteString("- Output format must be EXACTLY (use <<<END>>> as separator, do not use it inside messages):\n\n")
+		sb.WriteString("FILE: <filepath>\nMESSAGE:\n<commit message>\n<<<END>>>\n\n")
 		sb.WriteString("Now here are the diffs:\n\n")
 
 		for _, c := range changes {
@@ -225,14 +225,14 @@ func (g *GeminiClient) parseCommitResponse(raw string, changes []git.FileChange,
 		return result
 	}
 
-	// Parse FILE: / MESSAGE: / --- blocks
-	blocks := strings.Split(raw, "---")
+	// Parse FILE: / MESSAGE: / <<<END>>> blocks
+	blocks := strings.Split(raw, "<<<END>>>")
 	for _, block := range blocks {
 		block = strings.TrimSpace(block)
 		if block == "" {
 			continue
 		}
-		lines := strings.SplitN(block, "\n", -1)
+		lines := strings.Split(block, "\n")
 		var filePath, message string
 		inMessage := false
 
@@ -260,10 +260,23 @@ func (g *GeminiClient) parseCommitResponse(raw string, changes []git.FileChange,
 		}
 	}
 
-	// Fallback: if parsing failed, assign same message to all files
+	// Fallback: if parsing failed entirely, try positional matching
+	// (one block per file, in order)
 	if len(result) == 0 && len(changes) > 0 {
-		for _, c := range changes {
-			result[c.Path] = strings.TrimSpace(raw)
+		// Re-split to try positional assignment
+		rawBlocks := strings.Split(raw, "<<<END>>>")
+		var nonEmpty []string
+		for _, b := range rawBlocks {
+			if b = strings.TrimSpace(b); b != "" {
+				nonEmpty = append(nonEmpty, b)
+			}
+		}
+		for i, c := range changes {
+			if i < len(nonEmpty) {
+				result[c.Path] = nonEmpty[i]
+			} else {
+				result[c.Path] = fmt.Sprintf("chore: update %s", c.Path)
+			}
 		}
 	}
 
