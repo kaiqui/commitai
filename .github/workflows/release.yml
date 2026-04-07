@@ -336,8 +336,8 @@ jobs:
         run: |
           VERSION="${{ needs.version.outputs.new_version }}"
           COMMIT="${{ github.sha }}"
-          LDFLAGS="-X github.com/seu-usuario/commitai/cmd.Version=${VERSION} \
-                   -X github.com/seu-usuario/commitai/cmd.Commit=${COMMIT:0:8} \
+          LDFLAGS="-X github.com/kaiqui/commitai/cmd.Version=${VERSION} \
+                   -X github.com/kaiqui/commitai/cmd.Commit=${COMMIT:0:8} \
                    -s -w"
           NAME="commitai_${GOOS}_${GOARCH}"
 
