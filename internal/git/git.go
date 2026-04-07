@@ -87,6 +87,17 @@ func Commit(message string) error {
 	return nil
 }
 
+// UnstageAll removes all files from the index without touching the working tree
+func UnstageAll() error {
+	if _, err := run("git", "restore", "--staged", "."); err != nil {
+		// Fallback for older git versions (<2.23)
+		if _, err2 := run("git", "reset", "HEAD", "--", "."); err2 != nil {
+			return fmt.Errorf("failed to unstage files: %w", err2)
+		}
+	}
+	return nil
+}
+
 // IsGitRepo checks if current directory is inside a git repo
 func IsGitRepo() bool {
 	_, err := run("git", "rev-parse", "--git-dir")
