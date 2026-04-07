@@ -74,16 +74,18 @@ install_binary() {
 
     info "Extracting..."
     tar -xzf "${tmp_dir}/${filename}" -C "$tmp_dir"
+    # Binary inside the archive is named commitai_<platform>; rename to commitai
+    mv "${tmp_dir}/${BINARY}_${platform}" "${tmp_dir}/${BINARY}"
 
     # Check if we need sudo
     if [ -w "$INSTALL_DIR" ]; then
         mv "${tmp_dir}/${BINARY}" "${INSTALL_DIR}/${BINARY}"
+        chmod +x "${INSTALL_DIR}/${BINARY}"
     else
         info "Requesting sudo to install to ${INSTALL_DIR}..."
         sudo mv "${tmp_dir}/${BINARY}" "${INSTALL_DIR}/${BINARY}"
+        sudo chmod +x "${INSTALL_DIR}/${BINARY}"
     fi
-
-    chmod +x "${INSTALL_DIR}/${BINARY}"
 }
 
 main() {
@@ -97,7 +99,7 @@ main() {
         current=$(commitai version 2>/dev/null | awk '{print $2}' || echo "unknown")
         warn "commitai is already installed (version: ${current})"
         printf "  Reinstall? [y/N]: "
-        read -r answer
+        read -r answer </dev/tty
         if [[ "$answer" != "y" && "$answer" != "Y" ]]; then
             echo "Aborted."
             exit 0
